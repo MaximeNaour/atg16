@@ -598,8 +598,30 @@ for (ref in cond) {
   )
 }
 
+# Convertir les colonnes nécessaires en facteurs
+metadata$gp <- as.factor(metadata$Condition)
 
-# Fonction pour exécuter ALDEx2 pour chaque Condition comme référence
+# Créer une matrice de modèle pour inclure toutes les comparaisons
+mm <- model.matrix(~ 0 + gp, metadata)
+colnames(mm) <- gsub("gp", "", colnames(mm))
+
+# Affichage pour vérification
+cat("Dimensions de la matrice de modèle :", dim(mm), "\n")
+cat("Colonnes de la matrice de modèle :", colnames(mm), "\n")
+
+# Exécution d'ALDEx2 pour log-transformer les données
+clr.res <- aldex.clr(reads = dataset, 
+                              conds = mm,
+                              mc.samples = 1000, 
+                              denom = features,
+                              useMC = TRUE, 
+                              verbose = TRUE)
+
+# Obtenir les valeurs log-transformées par CLR 
+mc.instances <- getMonteCarloInstances(clr.res)
+df.clr <- sapply(names(mc.instances), function(sample) rowMeans(mc.instances[[sample]], na.rm = TRUE))
+
+# Fonction pour exécuter ALDEx2 pour chaque Condition comme référence pour les effets
 comp.gps <- function(ref, data, metadata, gp) {
   data <- as.data.frame(data)
   metadata$gp <- relevel(as.factor(metadata[[gp]]), ref = ref)
@@ -608,33 +630,101 @@ comp.gps <- function(ref, data, metadata, gp) {
   print(dim(mm))
   print(colnames(mm))
   aldex.clr <- aldex.clr(data, mm, mc.samples = 1000, denom = features, useMC = FALSE, verbose = TRUE)
-  mc.instances <- getMonteCarloInstances(aldex.clr)
-  clr <- sapply(names(mc.instances), function(sample) rowMeans(mc.instances[[sample]], na.rm = TRUE))
   glm <- aldex.glm(aldex.clr, verbose = TRUE)
   glm.effect <- aldex.glm.effect(aldex.clr, useMC = FALSE, CI = 95, verbose = TRUE)
-  df <- data.frame(
-    clr,
-    glm,
-    glm.effect,
-    check.names = FALSE
-  )
+  df <- data.frame(glm, glm.effect, check.names = FALSE)
   return(df)
 }
 
 # Automation to change reference groups
 all <- list()
 
-for (ref in cond) {
+# Itérer sur tous les groupes pour redéfinir le groupe de référence (sans le dernier)
+for (ref in cond[-length(cond)]) {
  cat("Computing for Condition with reference", ref, "\n")
- result_name <- paste0(i, "_Condition_ref_", ref)
- all[[result_name]] <- comp.gps(as.character(ref), dataset, metadata_filt, "Condition")
+ all[[ref]] <- comp.gps(as.character(ref), dataset, metadata_filt, "Condition")
 }
 
 # Check the dataframes
 for (name in names(all)) {
   cat("\nResult for", name, ":\n")
-  print(head(all[[name]]))
+  print(head(all[[name]], n = 2L))
 }
+
+# Liste de dataframes filtrés
+df.filt <- list()
+
+# Supprimer les colonnes inutiles et renommer les colonnes en ajoutant le groupe de référence
+for (df in names(all)) {
+  subdf <- all[[df]][, !grepl("^Intercept::", colnames(all[[df]])), drop = FALSE]
+  colnames(subdf) <- paste0("ref_", df, "_", colnames(subdf))
+  df.filt[[df]] <- subdf
+}
+
+# Afficher les noms des colonnes pour vérifier leur format
+for (n in names(df.filt)) {
+  cat("\nNoms des colonnes dans le dataframe :", n, "\n")
+  print(grep("gpAtg16wt", colnames(df.filt[[n]]), value = TRUE, invert = TRUE))
+}
+
+
+# Créer une liste pour stocker les comparaisons
+comp <- list()
+
+# Extraire les colonnes pour chaque comparaison basée sur cond
+for (i in seq_along(cond)[-length(cond)]) {
+  ref <- cond[i]
+  other_groups <- cond[(i + 1):length(cond)]
+  
+  for (comp_group in other_groups) {
+    # Construire le pattern pour sélectionner les colonnes correspondantes
+    pattern <- paste0("^ref_", ref, "_gp", comp_group, "[:.]")
+    
+    # Extraire et combiner les colonnes correspondant au pattern
+    extracted_cols <- lapply(df.filt, function(df) {
+      df[, grepl(pattern, colnames(df)), drop = FALSE]
+    })
+    
+    # Ajouter les colonnes extraites dans la liste
+    combined_df <- do.call(cbind, extracted_cols)
+    if (ncol(combined_df) > 0) {
+      comp[[length(comp) + 1]] <- combined_df
+    }
+  }
+}
+
+# Consolider les comparaisons dans un seul tableau
+df_diff <- do.call(cbind, comp)
+
+# Nettoyer les noms de colonnes
+colnames(df_diff) <- sub("^[^\\.]+\\.(ref_.*)", "\\1", colnames(df_diff))
+
+# Afficher les noms des colonnes pour chaque groupe de référence
+cat("\nNames of columns in the final dataframe for each reference group :\n")
+for (ref in cond) {
+  cat("\nReference :", ref, "\n")
+  print(grep(paste0("^ref_", ref, "_"), colnames(df_diff), value = TRUE))
+}
+
+# Convertir df.clr en dataframe si nécessaire
+df.clr <- as.data.frame(df.clr)
+
+# Fusionner df.clr et df_diff
+df_final <- cbind(df.clr, df_diff)
+
+# Ajouter les row.names comme première colonne
+df_final <- cbind(msp = rownames(df_final), df_final)
+
+# Enregistrer le dataframe final
+write_csv(df_final, "Data/output/df_final_aldex2_log_clr_glm.csv")
+write_xlsx(df_final, "Data/output/df_final_aldex2_log_clr_glm.xlsx")
+
+# Ecraser la table de comptage par celle log-transformée dans l'objet phyloseq
+ps.clr <- ps.filt
+otu_table(ps.clr) <- otu_table(as.matrix(df.clr), taxa_are_rows = TRUE)
+
+# Sauvegarder le nouvel objet phyloseq log-transformé
+saveRDS(ps.clr, file = "Data/atg16_tuft/ps_atg16_coverage_alpha_corr_clr.rds")
 
 
 # Beta-diversity with CLR-transformed data
@@ -642,75 +732,100 @@ for (name in names(all)) {
 # Move to the working directory
 setwd("/Users/Maxime/Desktop/Projects/HB/")
 
-# Lire l'objet ps
-ps <- readRDS("Data/atg16_tuft/ps_atg16_coverage_alpha_corr_clr.rds")
+# Lire l'objet ps non transformée (pour philR)
+ps <- readRDS("Data/atg16_tuft/ps_atg16_coverage_alpha_corr.rds")
 print(ps)
 dim(otu_table(ps))
 head(ps@otu_table)
+
+# Lire l'objet ps log-transformé
+ps.clr <- readRDS("Data/atg16_tuft/ps_atg16_coverage_alpha_corr_clr.rds")
+print(ps.clr)
+dim(otu_table(ps.clr))
+head(ps.clr@otu_table)
 
 # Spécifier l'ordre des conditions
 cond <- c("Atg16wt", "Atg16ko", "Pou2f3ko", "Atg16ko; Pou2f3ko")
 
 # Sélectionner les individus selon leur Condition
 ps.filt <- subset_samples(ps, Condition %in% cond)
+ps.clr.filt <- subset_samples(ps.clr, Condition %in% cond)
 
 # Modifier l'ordre des niveaux de facteur pour les Conditions
 sample_data(ps.filt)$Condition <- factor(sample_data(ps.filt)$Condition, levels = cond)
+sample_data(ps.clr.filt)$Condition <- factor(sample_data(ps.clr.filt)$Condition, levels = cond)
 
 # Associer des couleurs spécifiques aux conditions
 cond.colors <- RColorBrewer::brewer.pal(length(cond), "Set1")
 names(cond.colors) <- cond
 
 # Fonction pour générer les analyses de beta-diversité
-beta.ord <- function(ps, method, seed=NULL) {
-  # Extraction des données transformées CLR
-  clr_data <- as.data.frame(t(otu_table(ps)))
-  print(head(clr_data))
+beta.ord <- function(ps, method, feat = NULL, seed = NULL) {
+  data <- as.data.frame(t(otu_table(ps)))
+  metadata <- as(sample_data(ps), "data.frame")
   
-  # Calculer la distance Aitchison
-  dist_aitchison <- vegdist(clr_data, method = "euclidean")
+  compatible_methods <- c("NMDS", "MDS", "RDA", "philR")
+  if (!method %in% compatible_methods) {
+    stop(paste("La méthode", method, "n'est pas compatible avec les données CLR transformées."))
+  }
   
-  if (method == "NMDS") {
-    if (!is.null(seed)) {
-      set.seed(seed)
-    }
+  scores_df <- NULL
+  method_title <- ""
+  axis_names <- NULL
+  explained_var <- NULL
+  
+  if (method == "philR") {
+    tree <- phy_tree(ps)
+    otus <- otu_table(ps) + 1e-6
+    philr_obj <- philr(t(otus), tree, part.weights = "enorm.x.gm.counts", ilr.weights = "blw.sqrt")
+    dist_philr <- dist(philr_obj)
+    ord <- cmdscale(dist_philr, eig = TRUE, k = 2)
+    method_title <- "philR"
+    scores_df <- as.data.frame(ord$points)
+    colnames(scores_df) <- c("philR1", "philR2")
+    axis_names <- c("philR1", "philR2")
+    explained_var <- ord$eig[1:2] / sum(ord$eig) * 100
+  } else if (method == "NMDS") {
+    if (!is.null(seed)) set.seed(seed)
+    dist_aitchison <- vegdist(data, method = "euclidean")
     ord <- metaMDS(dist_aitchison, trymax = 100)
-    method_title = "NMDS"
+    method_title <- "NMDS"
     scores_df <- as.data.frame(ord$points)
     colnames(scores_df) <- c("NMDS1", "NMDS2")
     axis_names <- c("NMDS1", "NMDS2")
   } else if (method == "MDS") {
+    dist_aitchison <- vegdist(data, method = "euclidean")
     ord <- cmdscale(dist_aitchison, eig = TRUE, k = 2)
-    method_title = "MDS"
+    method_title <- "MDS"
     scores_df <- as.data.frame(ord$points)
     colnames(scores_df) <- c("MDS1", "MDS2")
     axis_names <- c("MDS1", "MDS2")
     explained_var <- ord$eig[1:2] / sum(ord$eig) * 100
-  } else {
-    stop("Méthode d'ordination non reconnue.")
+  } else if (method == "RDA") {
+    if (is.null(feat)) {
+      stop("For RDA, you must specify the metadata columns with the 'feat' argument.")
+    }
+    formula <- as.formula(paste("data ~", paste(feat, collapse = " + ")))
+    ord <- rda(formula, data = metadata)
+    method_title <- "RDA"
+    scores_df <- as.data.frame(scores(ord, display = "sites"))
+    colnames(scores_df) <- c("RDA1", "RDA2")
+    axis_names <- c("RDA1", "RDA2")
+    explained_var <- summary(ord)$cont$importance[2, 1:2] * 100
   }
   
-  # Préparation des données pour ggplot
   scores_df$Condition <- sample_data(ps)$Condition
   
-  # Matrice des distances
-  dist_aitchison <- as.matrix(dist_aitchison)
-  print(dist_aitchison)[1:5, 1:5]
-  
-  # Dataframe des métadonnées
-  metadata <- as(sample_data(sub.ps), "data.frame")
-  
-  # Exécuter le test PERMANOVA avec adonis2
-  perm_result <- vegan::adonis2(dist_aitchison ~ Condition, data = metadata, permutations = 999)
-  #print(perm_result)
-  #str(perm_result)
+  if (method != "philR") {
+    dist_aitchison <- vegdist(data, method = "euclidean")
+    perm_result <- vegan::adonis2(dist_aitchison ~ Condition, data = metadata, permutations = 999)
+  } else {
+    perm_result <- vegan::adonis2(dist_philr ~ Condition, data = metadata, permutations = 999)
+  }
   p_value <- perm_result$`Pr(>F)`[1]
-  print(paste("pvalue obtained after PERMANOVA test --> ", p_value))
-  
   stars <- ifelse(p_value < 0.001, "***", ifelse(p_value < 0.01, "**", ifelse(p_value < 0.05, "*", "ns")))
   
-  # Modifier les labels des axes pour inclure la variance expliquée si applicable
-  if (method %in% c("MDS")) {
+  if (!is.null(explained_var)) {
     labs_x <- paste(axis_names[1], "[", round(explained_var[1], 2), "%]")
     labs_y <- paste(axis_names[2], "[", round(explained_var[2], 2), "%]")
   } else {
@@ -718,30 +833,22 @@ beta.ord <- function(ps, method, seed=NULL) {
     labs_y <- axis_names[2]
   }
   
-  # Création du plot
   p_beta <- ggplot(scores_df, aes_string(x = axis_names[1], y = axis_names[2], color = "Condition")) +
     geom_point(size = 3) +
     theme_classic2() +
     labs(title = paste("Beta-diversity -", method_title),
-         subtitle = paste("Aitchison distance"),
+         subtitle = paste("Ordination using", method_title),
          x = labs_x, y = labs_y) +
     scale_color_manual(values = cond.colors) +
     scale_fill_manual(values = cond.colors) +
     stat_ellipse(aes(color = Condition, fill = Condition), geom = "polygon", 
-                 type = "norm", alpha = 0.05, linetype = 1, size = 0.3) +
+                 type = "norm", alpha = 0.05, linetype = 1, linewidth = 0.3) +
     annotate("text", x = Inf, y = Inf, label = paste("p =", format(p_value, digits = 2), stars),
              hjust = 1.1, vjust = 1.5, size = 4, color = "red3")
   
-  if (method %in% c("MDS", "NMDS")) {
-    seed_text <- if (!is.null(seed)) paste("- Seed:", seed) else ""
-    p_beta <- p_beta + labs(caption = paste("", seed_text, "\n", method_title, "analysis on CLR-transformed data - ALDEx2"))
-  }
-  
-  # Calculer les centres pour chaque Condition
   centers <- aggregate(cbind(scores_df[[axis_names[1]]], scores_df[[axis_names[2]]]) ~ Condition, data = scores_df, FUN = mean)
   colnames(centers) <- c("Condition", paste(axis_names[1], "center", sep = "."), paste(axis_names[2], "center", sep = "."))
   
-  # Créer un data.frame pour les segments
   segment_data <- scores_df %>%
     dplyr::left_join(centers, by = "Condition") %>%
     mutate(
@@ -751,7 +858,6 @@ beta.ord <- function(ps, method, seed=NULL) {
       y = .[[paste(axis_names[2], "center", sep = ".")]]
     )
   
-  # Ajouter des flèches
   p_beta <- p_beta +
     geom_segment(data = segment_data, aes(x = x, y = y, xend = xend, yend = yend),
                  alpha = 0.5)
@@ -760,14 +866,204 @@ beta.ord <- function(ps, method, seed=NULL) {
 }
 
 
+# Exécuter la fonction pour réaliser les analyses de beta-diversité
+methods <- c("philR", "NMDS", "MDS", "RDA")
+features <- c("Sex", "Condition", "Caecum_mg")
 plots <- list()
-methods <- c("MDS", "NMDS")
+
 for (method in methods) {
-  plots[[method]] <- beta.ord(ps.plot, method, if (method == "NMDS") 123 else NULL)
+  if (method == "philR") {
+    plots[[method]] <- beta.ord(ps.filt, method)
+  } else {
+    plots[[method]] <- beta.ord(ps.clr.filt, method, feat = features, seed = if (method == "NMDS") 123 else NULL)
+  }
 }
 
-# Affichage des plots
+# Afficher les plots
 for (method in methods) {
   print(plots[[method]])
 }
 
+# Enregistrer les plots
+png("Figures/Taxonomic/div/beta_diversity_atg16_clr.png", units = "cm", width = 30, height = 25, res = 300)
+
+grid.arrange(
+  grobs = plots,
+  ncol = 2,
+  top = "Beta-diversity Analysis"
+)
+
+dev.off()
+
+
+# COMPOSITIONAL
+
+# Move to the working directory
+setwd("/Users/Maxime/Desktop/Projects/HB/")
+
+# Lire l'objet ps log-transformé
+ps.clr <- readRDS("Data/atg16_tuft/ps_atg16_coverage_alpha_corr_clr.rds")
+print(ps.clr)
+dim(otu_table(ps.clr))
+head(ps.clr@otu_table)
+
+# Spécifier l'ordre des conditions
+cond <- c("Atg16wt", "Atg16ko", "Pou2f3ko", "Atg16ko; Pou2f3ko")
+
+# Sélectionner les individus selon leur Condition
+ps.clr.filt <- subset_samples(ps.clr, Condition %in% cond)
+
+# Modifier l'ordre des niveaux de facteur pour les Conditions
+sample_data(ps.clr.filt)$Condition <- factor(sample_data(ps.clr.filt)$Condition, levels = cond)
+
+# Associer des couleurs spécifiques aux conditions
+cond.colors <- RColorBrewer::brewer.pal(length(cond), "Set1")
+names(cond.colors) <- cond
+
+# Revenir aux "pseudo-comptages bruts" à partir des données CLR
+exp_data <- round(exp(otu_table(ps.clr.filt)))
+
+# Ecraser la table de comptage log-transformées par cette table de comptage brut
+ps.clr.raw <- ps.clr.filt
+ps.clr.raw@otu_table <- exp_data
+
+# Sauvegarder l'objet phyloseq
+saveRDS(ps.clr.raw, "Data/atg16_tuft/ps_atg16_coverage_alpha_corr_clr_raw.rds")
+
+# Lire l'objet ps log-transformé avec pseudo-comptage
+ps.clr.raw <- readRDS("Data/atg16_tuft/ps_atg16_coverage_alpha_corr_clr_raw.rds")
+print(ps.clr.raw)
+dim(otu_table(ps.clr.raw))
+head(ps.clr.raw@otu_table)
+
+# Spécifier l'ordre des conditions
+cond <- c("Atg16wt", "Atg16ko", "Pou2f3ko", "Atg16ko; Pou2f3ko")
+
+# Sélectionner les individus selon leur Condition
+ps.clr.raw.filt <- subset_samples(ps.clr.raw, Condition %in% cond)
+
+# Modifier l'ordre des niveaux de facteur pour les Conditions
+sample_data(ps.clr.raw.filt)$Condition <- factor(sample_data(ps.clr.raw.filt)$Condition, levels = cond)
+
+# Associer des couleurs spécifiques aux conditions
+cond.colors <- RColorBrewer::brewer.pal(length(cond), "Set1")
+names(cond.colors) <- cond
+
+# Fonction pour générer les barplots de l'analyse compositionnelle
+comp_taxa <- function(ps_data_filt, tax_level, gp.colors, output_dir) {
+  # Calculer le nombre de phyla pour définir la valeur de top
+  top <- length(unique(psmelt(tax_glom(ps_data_filt, "phylum"))$phylum))
+  
+  # Agréger les donnéess pour les niveaux riches
+  glom_tax <- aggregate_top_taxa2(ps_data_filt, top = top-1, tax_level)
+  df_tax <- psmelt(glom_tax)
+  
+  # Supprimer les lignes avec tax_level non identifié
+  df_tax <- df_tax[!is.na(df_tax[[tax_level]]),]
+  
+  # Calculer les proportions et convertir en pourcentage
+  df_tax <- df_tax %>%
+    dplyr::group_by(Sample) %>%
+    dplyr::mutate(Proportion = Abundance / sum(Abundance) * 100) %>%
+    ungroup()
+  
+  # Trier les échantillons par Condition
+  df_tax <- df_tax %>%
+    dplyr::mutate(
+      Condition = factor(Condition, levels = levels(sample_data(ps_data_filt)$Condition))
+    ) %>%
+    dplyr::arrange(Condition) %>%
+    dplyr::mutate(Sample = factor(Sample, levels = unique(Sample)))
+  
+  # Calculer l'abondance moyenne par Condition
+  df_tax_mean <- df_tax %>%
+    dplyr::group_by(Condition, !!sym(tax_level)) %>%
+    dplyr::summarize(Proportion = mean(Proportion, na.rm = TRUE), .groups = "drop")
+  
+  # Palette de couleurs
+  nb.cols <- length(unique(df_tax[[tax_level]]))
+  palette <- ggsci::pal_frontiers(alpha = 0.5)(nb.cols)
+  palette[is.na(palette)] <- c("#f0a5b4", "#f4bde8")[1:sum(is.na(palette))]
+  palette <- c(palette[palette != "#706F6F7F"], "#706F6F7F")
+  
+  # Créer le barplot empilé pour tous les échantillons
+  tax_plot <- ggplot(df_tax, aes(x = Sample, y = Proportion, fill = !!sym(tax_level))) +
+    geom_bar(stat = "identity", position = "stack") +
+    theme_classic2() +
+    scale_fill_manual(values = palette, name = tax_level) +
+    ggnewscale::new_scale_fill() +
+    geom_bar(aes(fill = Condition), stat = "identity", alpha = 0, show.legend = TRUE) +
+    scale_fill_manual(
+      name = "Condition",
+      values = cond.colors,
+      guide = guide_legend(override.aes = list(alpha = 1))
+    ) +
+    scale_x_discrete(labels = function(x) {
+      sapply(x, function(sample) {
+        condition <- as.character(sample_info[sample_info$Sample == sample, "Condition"])
+        sprintf('<span style="color:%s;">%s</span>', cond.colors[condition], sample)
+      })
+    }) +
+    labs(
+      x = "",
+      y = "Relative Abundance (%)",
+      fill = tax_level,
+      title = paste("Relative Abundance of", tax_level, "by Sample"),
+      caption = "CLR dataset converted in pseudo-counts"
+    ) +
+    theme(
+      axis.text.x = ggtext::element_markdown(angle = 90, vjust = 0.5, hjust = 1, size = 12),
+      axis.text.y = element_text(size = 12, face = "bold"),
+      panel.grid.major.y = element_line(color = "grey80", linewidth = 0.75),
+      legend.position = "right",
+      legend.title = element_text(size = 12, face = "bold"),
+      legend.text = element_text(size = 12),
+      plot.caption = element_text(size = 10, face = "bold"),
+      plot.title = element_text(hjust = 0.5, size = 16, face = "bold", color = "black")
+    )
+  
+  # Enregistrer le barplot
+  ggsave(
+    filename = file.path(output_dir, paste0("relabundance_", tax_level, "_samples.png")),
+    plot = tax_plot, width = 10, height = 8, bg = "white", dpi = 300
+  )
+  
+  # Créer le barplot empilé pour l'abondance moyenne
+  tax_plot_mean <- ggplot(df_tax_mean, aes(x = Condition, y = Proportion, fill = !!sym(tax_level))) +
+    geom_bar(stat = "identity", position = "stack") +
+    theme_classic2() +
+    scale_fill_manual(values = palette, name = tax_level) +
+    labs(
+      x = "Condition",
+      y = "Relative Abundance (%)",
+      fill = tax_level,
+      title = paste("Relative Abundance of", tax_level, "by Condition"),
+      caption = "CLR dataset converted in pseudo-counts"
+    ) +
+    theme(
+      axis.text.x = element_text(angle = 45, vjust = 1, hjust = 1, size = 12, face = "bold"),
+      axis.text.y = element_text(size = 12, face = "bold"),
+      panel.grid.major.y = element_line(color = "grey80", linewidth = 0.75),
+      legend.position = "right",
+      legend.title = element_text(size = 12, face = "bold"),
+      legend.text = element_text(size = 12),
+      plot.caption = element_text(size = 10, face = "bold"),
+      plot.title = element_text(hjust = 0.5, size = 16, face = "bold", color = "black")
+    )
+  
+  # Enregistrer le barplot
+  ggsave(
+    filename = file.path(output_dir, paste0("relabundance_mean_", tax_level, "_conditions.png")),
+    plot = tax_plot_mean, width = 10, height = 8, bg = "white", dpi = 300
+  )
+}
+
+
+# Utiliser la fonction pour chaque niveau taxonomique
+tax_levels <- colnames(ps.clr.raw.filt@tax_table)[2:length(colnames(ps.clr.raw.filt@tax_table))]
+output <- "Figures/Taxonomic/composition"
+dir.create(output, showWarnings = FALSE)
+
+for (tax_level in tax_levels) {
+  comp_taxa(ps_data = ps.clr.raw.filt, tax_level = tax_level, gp.colors = cond.colors, output_dir = output)
+}
