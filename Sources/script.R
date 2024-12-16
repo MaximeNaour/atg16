@@ -17,6 +17,7 @@ library(microbiomeutilities); packageVersion("microbiomeutilities")
 library(dplyr); packageVersion("dplyr")
 library(vegan); packageVersion("vegan")
 library(ggplot2); packageVersion("ggplot2")
+library(ggh4x); packageVersion("ggh4x")
 library(ggforce); packageVersion("ggforce")
 library(ggnewscale); packageVersion("ggnewscale")
 library(phyloseq); packageVersion("phyloseq")
@@ -183,6 +184,12 @@ ps <- readRDS("Data/atg16_tuft/ps_atg16_coverage.rds")
 # Extraction des noms d'échantillons
 samples <- rownames(sample_data(ps))
 
+# Import metadata
+metadata <- read.csv("Data/atg16_tuft/metadata_atg16.csv", 
+                     header = TRUE, sep = ",", stringsAsFactors = FALSE)
+rownames(metadata) <- metadata$SampleID
+head(metadata)
+
 # Associer les données du tableau `report` aux échantillons dans `ps`
 report_subset <- report %>%
   dplyr::filter(sample %in% samples) %>%
@@ -204,10 +211,11 @@ cond <- c("Atg16wt", "Atg16ko", "Pou2f3ko", "Atg16ko; Pou2f3ko")
 df$ttt <- factor(df$ttt, levels = cond)
 head(df$ttt)
 
-# Préparer le dataframe pour ggplot
+# Préparer le dataframe
 df_melt <- df %>%
-  pivot_longer(-c(samples, ttt), names_to = "step", values_to = "reads") %>%
-  arrange(ttt, samples)
+  mutate(Sex = metadata[as.character(samples), "Sex"]) %>%
+  pivot_longer(-c(samples, ttt, Sex), names_to = "step", values_to = "reads") %>%
+  arrange(ttt, factor(Sex, levels = c("Female", "Male")), samples)
 
 # Redéfinir les facteurs pour les échantillons et conditions
 df_melt$samples <- factor(df_melt$samples, levels = unique(df_melt$samples))
@@ -226,30 +234,41 @@ max_reads <- max(df_melt$reads, na.rm = TRUE)
 min_reads <- min_reads - (0.05 * (max_reads - min_reads))
 if (min_reads < 0) min_reads <- 0 
 
+# Associer des couleurs spécifiques pour le sexe
+sex.colors <- c("Male" = "#7BCFE5", "Female" = "#FEB2B2")
+
+# Matcher les conditions (ttt) du dataframe df_melt avec les échantillons du dataframe metadata 
+# Cela ajoute une colonne ttt à metadata, permettant de lier chaque échantillon à sa condition expérimentale.
+metadata$ttt <- df_melt$ttt[match(metadata$SampleID, df_melt$samples)]
+
 # Générer le barplot
 process.p <- ggplot(df_melt, aes(x = samples, y = reads, fill = step)) +
   geom_bar(stat = "identity", position = position_dodge(width = 0.7), width = 0.6) +
   scale_fill_brewer(palette = "Set2", name = "Step") +
   ggnewscale::new_scale_fill() +
   geom_bar(aes(fill = ttt), stat = "identity", alpha = 0, show.legend = TRUE) +
-  labs(
-    x = "", y = "Reads count",
-    fill = "Step",
-    title = "Read counts at different processing steps",
-    color = "Condition"
+  scale_fill_manual(name = "Condition", values = cond.colors, guide = guide_legend(override.aes = list(alpha = 1))) +
+  ggnewscale::new_scale_fill() +
+  geom_tile(
+    data = metadata,
+    aes(x = SampleID, y = -0.02 * max_reads, fill = Sex),
+    height = 0.03 * max_reads,
+    inherit.aes = FALSE
   ) +
-  scale_fill_manual(
-    name = "Condition",
-    values = cond.colors,
-    guide = guide_legend(override.aes = list(alpha = 1))
+  scale_fill_manual(name = "Sex", values = sex.colors, guide = guide_legend(title = "Sex")) +
+  scale_y_continuous(
+    limits = c(-0.03 * max(df_melt$reads), max(df_melt$reads)), 
+    labels = function(y) ifelse(y > 0, y, ""),
+    oob = scales::squish
   ) +
-  scale_y_continuous(limits = c(min_reads, max_reads), oob = scales::squish) +
+  facet_grid(.~ttt, scales = "free_x", space = "free_x") +
   scale_x_discrete(labels = function(x) {
     sapply(x, function(sample) {
       sprintf('<span style="color:%s;">%s</span>', cond.colors[as.character(df[df$samples == sample, "ttt"])], sample)
     })
   }) +
-  theme_classic() +
+  coord_cartesian(ylim = c(-0.03 * max(df_melt$reads), max(df_melt$reads)), expand = FALSE) +
+  theme_classic2() +
   theme(
     axis.text.x = ggtext::element_markdown(angle = 45, vjust = 1, hjust = 1, face = "bold", size = 12),
     axis.text.y = element_text(face = "bold", size = 12),
@@ -257,57 +276,90 @@ process.p <- ggplot(df_melt, aes(x = samples, y = reads, fill = step)) +
     legend.title = element_text(face = "bold", size = 12),
     legend.text = element_text(size = 12),
     plot.title = element_text(hjust = 0.5, face = "bold", size = 16),
-    axis.title = element_text(face = "bold", size = 14)
+    axis.title = element_text(face = "bold", size = 14),
+    strip.text = element_blank(),
+    plot.margin = margin(10, 10, 10, 10)
+  ) +
+  labs(
+    x = "",
+    y = "Reads count",
+    title = "Read counts at each step"
   )
+
+# Afficher le graphique
 print(process.p)
 
 # Enregistrer le graphique
-ggsave("Figures/Taxonomic/processing/overview_processing_atg16.png", 
+ggsave("Figures/Taxonomic/processing/overview_processing_atg16.png",
        process.p, width = 14, height = 10, dpi = 300, bg = "white")
 
-# Calcul des moyennes et écarts-types par Condition
-df_summary <- df_melt %>%
-  group_by(ttt, step) %>%
-  summarise(mean = mean(reads, na.rm = TRUE),
-            sd = sd(reads, na.rm = TRUE),
-            n = n(), .groups = 'drop')
+# Liste des configurations à générer
+configs <- list(
+  list(name = "by_cond", grouping_vars = c("ttt", "step"), facet = FALSE),
+  list(name = "by_cond_and_sex", grouping_vars = c("ttt", "step", "Sex"), facet = TRUE)
+)
 
-# Identifier le nombre minimum et maximum des moyennes pour ajuster l'axe y
-min_reads <- min(df_melt$reads, na.rm = TRUE)
-max_reads <- max(df_melt$reads, na.rm = TRUE)
-
-# Ajuster la limite inférieure pour inclure la plus petite valeur
-min_reads <- min_reads - (0.05 * (max_reads - min_reads))
-if (min_reads < 0) min_reads <- 0
-
-# Création du barplot par condition
-process.bp <- ggplot(df_summary, aes(x = ttt, y = mean, fill = step)) +
-  geom_bar(stat = "identity", position = position_dodge(width = 0.7), width = 0.6) +
-  geom_errorbar(aes(ymin = mean - sd, ymax = mean + sd), 
-                width = 0.2, 
-                position = position_dodge(0.7)) +
-  labs(
-    x = "", y = "Reads count", fill = "Step", 
-    title = "Average read counts at different processing steps by condition"
-  ) +
-  scale_fill_brewer(palette = "Set2", name = "Step") +
-  scale_y_continuous(limits = c(min_reads, max_reads), oob = scales::squish) +
-  theme_classic() +
-  theme(
-    axis.text.x = element_text(angle = 45, vjust = 1, hjust = 1, face = "bold", size = 12),
-    axis.text.y = element_text(face = "bold", size = 12),
-    legend.position = "right",
-    legend.title = element_text(face = "bold", size = 12),
-    legend.text = element_text(size = 12),
-    plot.title = element_text(hjust = 0.5, face = "bold", size = 16),
-    axis.title = element_text(face = "bold", size = 14)
+# Boucle pour générer les graphiques selon les configurations
+for (config in configs) {
+  # Calcul des moyennes et écarts-types
+  df_summary <- df_melt %>%
+    group_by(across(all_of(config$grouping_vars))) %>%
+    summarise(
+      mean = mean(reads, na.rm = TRUE),
+      sd = sd(reads, na.rm = TRUE),
+      n = n(),
+      .groups = 'drop'
+    )
+  
+  # Identifier les limites de l'axe y
+  min_reads <- min(df_summary$mean, na.rm = TRUE)
+  max_reads <- max(df_summary$mean, na.rm = TRUE)
+  
+  # Ajuster la limite inférieure
+  min_reads <- min_reads - (0.05 * (max_reads - min_reads))
+  if (min_reads < 0) min_reads <- 0
+  
+  # Initialisation du barplot
+  process.bp <- ggplot(df_summary, aes(x = ttt, y = mean, fill = step)) +
+    geom_bar(stat = "identity", position = position_dodge(width = 0.7), width = 0.6) +
+    geom_errorbar(
+      aes(ymin = mean - sd, ymax = mean + sd),
+      width = 0.2,
+      position = position_dodge(0.7)
+    ) +
+    labs(
+      x = "Condition",
+      y = "Reads count",
+      fill = "Step",
+      title = "Average read counts at different processing steps"
+    ) +
+    scale_fill_brewer(palette = "Set2", name = "Step") +
+    scale_y_continuous(limits = c(min_reads, max_reads), oob = scales::squish) +
+    theme_classic() +
+    theme(
+      axis.text.x = element_text(angle = 45, vjust = 1, hjust = 1, face = "bold", size = 12),
+      axis.text.y = element_text(face = "bold", size = 12),
+      legend.position = "right",
+      legend.title = element_text(face = "bold", size = 12),
+      legend.text = element_text(size = 12),
+      plot.title = element_text(hjust = 0.5, face = "bold", size = 16),
+      axis.title = element_text(face = "bold", size = 14),
+      strip.text = element_text(face = "bold", size = 14)
+    )
+  # Ajouter les facettes
+  if (config$facet) {
+    process.bp <- process.bp + facet_wrap(~Sex, nrow = 1)
+  }
+  
+  # Afficher le graphique
+  print(process.bp)
+  
+  # Enregistrer le graphique
+  ggsave(
+    filename = paste0("Figures/Taxonomic/processing/overview_processing_", config$name, ".png"),
+    plot = process.bp, width = 10, height = 8, dpi = 300, bg = "white"
   )
-print(process.bp)
-
-# Enregistrer le graphique
-ggsave("Figures/Taxonomic/processing/overview_processing_atg16_summary.png", 
-       process.bp, width = 10, height = 8, dpi = 300, bg = "white")
-
+}
 
 # Rarefaction curves
 
@@ -929,6 +981,7 @@ ps.clr.raw@otu_table <- exp_data
 
 # Sauvegarder l'objet phyloseq
 saveRDS(ps.clr.raw, "Data/atg16_tuft/ps_atg16_coverage_alpha_corr_clr_raw.rds")
+
 
 # Lire l'objet ps log-transformé avec pseudo-comptage
 ps.clr.raw <- readRDS("Data/atg16_tuft/ps_atg16_coverage_alpha_corr_clr_raw.rds")
