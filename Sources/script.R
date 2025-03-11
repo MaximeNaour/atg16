@@ -8,6 +8,8 @@
 library(devtools)
 library(BiocManager)
 library(igraph); packageVersion("igraph")
+library(ggrepel); packageVersion("ggrepel")
+library(ggprism); packageVersion("ggprism")
 library(readxl); packageVersion("readxl")
 library(openxlsx); packageVersion("openxlsx")
 library(writexl); packageVersion("writexl")
@@ -22,21 +24,21 @@ library(ggforce); packageVersion("ggforce")
 library(ggnewscale); packageVersion("ggnewscale")
 library(phyloseq); packageVersion("phyloseq")
 library(phyloseq.extended); packageVersion("phyloseq.extended")
-#library(biomformat); packageVersion("biomformat")
+library(biomformat); packageVersion("biomformat")
 library(DESeq2); packageVersion("DESeq2")
-#library(tibble); packageVersion("tibble")  
-#library(plyr); packageVersion("plyr")
+library(tibble); packageVersion("tibble")  
+library(plyr); packageVersion("plyr")
 library(gcookbook); packageVersion("gcookbook")
 library(tidyverse); packageVersion("tidyverse")
 library(viridis); packageVersion("viridis")
 library(gdata); packageVersion("gdata")
-#library(data.table); packageVersion("data.table")
-#library(ade4); packageVersion("ade4")
+library(data.table); packageVersion("data.table")
+library(ade4); packageVersion("ade4")
 library(effsize); packageVersion("effsize")
 library(ComplexHeatmap); packageVersion("ComplexHeatmap")
 library(circlize); packageVersion("circlize")
-#library(RColorBrewer); packageVersion("RColorBrewer")
-#library(cluster); packageVersion("cluster")
+library(RColorBrewer); packageVersion("RColorBrewer")
+library(cluster); packageVersion("cluster")
 library(factoextra); packageVersion("factoextra")
 library(gridExtra); packageVersion("gridExtra")
 library(magick); packageVersion("magick")
@@ -44,7 +46,7 @@ library(fpc); packageVersion("fpc")
 library(mixOmics); packageVersion("mixOmics") # devtools::install_github("mixOmicsTeam/mixOmics")
 library(ropls); packageVersion("ropls")
 library(ggtree); packageVersion("ggtree")
-library(ALDEx2, lib.loc = "C:/Users/Maxime/AppData/Local/R/win-library/4.2"); packageVersion("ALDEx2") #BiocManager::install("ALDEx2") & install.packages("MASS", lib = "C:/Users/Maxime/AppData/Local/R/win-library/4.2")
+library(ALDEx2); packageVersion("ALDEx2") #BiocManager::install("ALDEx2") & install.packages("MASS", lib = "C:/Users/Maxime/AppData/Local/R/win-library/4.2")
 
 # Color palettes
 ggsci.pals <- c("npg", "aaas", "nejm", "lancet", "jama", "jco", "ucscgb", "d3", 
@@ -456,8 +458,8 @@ div.df <- as.data.frame(div.est)
 div.df$Sample <- rownames(div.df)
 div.df <- merge(div.df, data.frame(sample_data(ps.filt)), by.x="Sample", by.y="row.names")
 
-# Fonction pour les graphiques avec annotations
-rich.alpha <- function(df, measure, title, colors) {
+# Fonction pour générer les analyses + plots
+rich.alpha <- function(df, measure, split_cond, title, colors) {
   # Calculer les tailles des échantillons
   sample_sizes <- df %>%
     dplyr::group_by(Condition) %>%
@@ -476,22 +478,35 @@ rich.alpha <- function(df, measure, title, colors) {
   )
   
   # Comparaisons pour les tests statistiques
-  comp <- list(
-    c(levels(df$Condition_label)[1], levels(df$Condition_label)[2]),
-    c(levels(df$Condition_label)[1], levels(df$Condition_label)[3]),
-    c(levels(df$Condition_label)[2], levels(df$Condition_label)[4]),
-    c(levels(df$Condition_label)[3], levels(df$Condition_label)[4])
-  )
-
-  test_result <- kruskal.test(as.formula(paste(measure, "~ Condition")), data = df)
-  caption_text <- paste0(
-    "\nKruskal-Wallis p-value: ", sprintf("%.3f", test_result$p.value)
-  )
-  p <- ggplot(df, aes(x = Condition_label, y = !!rlang::sym(measure), fill = Condition)) +
+  comp <- combn(levels(df$Condition), 2, simplify = FALSE)
+  
+  # Comparaisons pour les tests statistiques
+  if (!is.null(split_cond) && split_cond != "") {
+    test_result <- df %>%
+      group_by(!!sym(split_cond)) %>%
+      summarise(
+        p_value = kruskal.test(as.formula(paste(measure, "~ Condition")), data = cur_data())$p.value,
+        .groups = "drop"
+      )
+    
+    caption.text <- paste0(
+      "Kruskal-Wallis p-values:\n",
+      paste(test_result[[split_cond]], sprintf("%.3f", test_result$p_value), sep = ": ", collapse = "; ")
+    )
+  } else {
+    test_result <- kruskal.test(as.formula(paste(measure, "~ Condition")), data = df)
+    caption.text <- paste0(
+      "Kruskal-Wallis p-value: ", sprintf("%.3f", test_result$p.value)
+    )
+  }
+  
+  # Créer le plot
+  p <- ggplot(df, aes(x = Condition, y = !!rlang::sym(measure), fill = Condition)) +
     geom_violin(trim = TRUE, scale = "width", alpha = 0.7) +
     geom_boxplot(width = 0.2, outlier.shape = NA, color = "black") +
     geom_jitter(width = 0.2, size = 1.5, color = "black") +
-    labs(title = title, y = measure, x = "", caption = caption_text) +
+    scale_x_discrete(labels = levels(df$Condition_label)) +
+    labs(title = title, y = measure, x = "", caption = caption.text) +
     theme_bw() +
     theme(
       panel.grid.major.y = element_line(color = "grey80", size = 0.75),
@@ -503,19 +518,25 @@ rich.alpha <- function(df, measure, title, colors) {
     ) +
     scale_fill_manual(values = colors) +
     stat_compare_means(comparisons = comp, label = "p.format", method = "t.test") #p.format or p.signif
+  
+  # Appliquer le splitting si split_cond est spécifiés
+  if (!is.null(split_cond) && split_cond != "") {
+    p <- p + facet_grid(as.formula(paste(". ~", split_cond)))
+  }
+  
   return(p)
 }
 
 # Générer les plots
 rich.plots <- lapply(c("Observed", "Shannon", "Simpson", "InvSimpson", "Fisher"), function(measure) {
-  rich.alpha(div.df, measure, measure, cond.colors)
+  rich.alpha(div.df, measure, split_cond = "Sex", title = measure, colors = cond.colors)
 })
 
 # Combiner les plots
 comb <- do.call(grid.arrange, c(rich.plots, ncol = 3))
 
 # Sauvegarder les plots combinés
-ggsave("Figures/Taxonomic/div/alpha_diversity_atg16_coverage.png", 
+ggsave("Figures/Taxonomic/div/adiv_atg16_coverage.png", 
        comb, width = 16, height = 12, bg = "white", dpi = 300)
 
 # Générer toutes les combinaisons possibles de comparaisons
@@ -651,10 +672,10 @@ for (ref in cond) {
 }
 
 # Convertir les colonnes nécessaires en facteurs
-metadata$gp <- as.factor(metadata$Condition)
+metadata_filt$gp <- as.factor(metadata_filt$Condition)
 
 # Créer une matrice de modèle pour inclure toutes les comparaisons
-mm <- model.matrix(~ 0 + gp, metadata)
+mm <- model.matrix(~ 0 + gp, metadata_filt)
 colnames(mm) <- gsub("gp", "", colnames(mm))
 
 # Affichage pour vérification
@@ -1120,3 +1141,506 @@ dir.create(output, showWarnings = FALSE)
 for (tax_level in tax_levels) {
   comp_taxa(ps_data = ps.clr.raw.filt, tax_level = tax_level, gp.colors = cond.colors, output_dir = output)
 }
+
+
+# Analyses différentielles
+
+# Volcano & MA
+
+# Move to the working directory
+setwd("/Users/Maxime/Desktop/Projects/HB/")
+
+# Import log-transformed table
+df.clr <- read.csv("Data/output/df_final_aldex2_log_clr_glm.csv")
+head(df.clr)
+
+# Read the log-transformed ps object
+ps.clr <- readRDS("Data/atg16_tuft/ps_atg16_coverage_alpha_corr_clr.rds")
+print(ps.clr)
+dim(otu_table(ps.clr))
+head(ps.clr@otu_table)
+head(ps.clr@tax_table)
+
+# Spécifier l'ordre des conditions
+cond <- c("Atg16wt", "Atg16ko", "Pou2f3ko", "Atg16ko; Pou2f3ko")
+
+# Sélectionner les individus selon leur Condition
+ps.filt <- subset_samples(ps.clr, Condition %in% cond)
+
+# Modifier l'ordre des niveaux de facteur pour les Conditions
+sample_data(ps.filt)$Condition <- factor(sample_data(ps.filt)$Condition, levels = cond)
+
+# Conversion of tax_table into dataframe
+tax_df <- as.data.frame(ps.filt@tax_table) %>%
+  rownames_to_column(var = "msp")
+
+# Merge taxonomies with clr-transformed abundance table
+df_merged <- df.clr %>%
+  dplyr::left_join(tax_df, by = "msp")
+
+# Identification des colonnes ajoutées
+add_cols <- setdiff(names(tax_df), "msp")
+
+# Déplacement des colonnes ajoutées entre la 1ère et 2ème colonne de df.clr
+df_merged <- df_merged %>%
+  dplyr::relocate(all_of(add_cols), .after = 1)
+
+# Fonction pour normaliser les noms de colonnes
+norm_colnames <- function(colnames_vector) {
+  colnames_vector %>%
+    gsub("[[:space:]]+", "", .) %>%
+    gsub("[.]+", "_", .) %>%
+    gsub(";", "_", .)
+}
+
+# Remplacer ".." par "." dans les noms de colonnes de df_merged
+colnames(df_merged) <- norm_colnames(colnames(df_merged))
+head(df_merged)
+
+# Définir les combinaisons
+comb_define <- function(cond1, cond2, df) {
+  # Construction des préfixes pour les deux directions
+  prefix_1_vs_2 <- paste0("ref_", cond1, "_gp", cond2)
+  prefix_2_vs_1 <- paste0("ref_", cond2, "_gp", cond1)
+  
+  # Identification des colonnes de significativité brute et corrigée pour chaque comparaison
+  signif_raw_1_vs_2  <- paste0(prefix_1_vs_2, ".pval")
+  signif_holm_1_vs_2 <- paste0(prefix_1_vs_2, ".pval.holm")
+  
+  signif_raw_2_vs_1  <- paste0(prefix_2_vs_1, ".pval")
+  signif_holm_2_vs_1 <- paste0(prefix_2_vs_1, ".pval.holm")
+  
+  # Colonnes avec les mesures différentielles pour "cond1 vs cond2"
+  diff_1_vs_2 <- c(
+    diff_btw    = paste0(prefix_1_vs_2, ".diff.btw"),
+    rab_all     = paste0(prefix_1_vs_2, ".rab.all"),
+    effect      = paste0(prefix_1_vs_2, ".effect"),
+    effect_low  = paste0(prefix_1_vs_2, ".effect.low"),
+    effect_high = paste0(prefix_1_vs_2, ".effect.high"),
+    dispersion  = paste0(prefix_1_vs_2, ".diff.win")
+  )
+  
+  # Colonnes avec les mesures différentielles pour "cond2 vs cond1"
+  diff_2_vs_1 <- c(
+    diff_btw    = paste0(prefix_2_vs_1, ".diff.btw"),
+    rab_all     = paste0(prefix_2_vs_1, ".rab.all"),
+    effect      = paste0(prefix_2_vs_1, ".effect"),
+    effect_low  = paste0(prefix_2_vs_1, ".effect.low"),
+    effect_high = paste0(prefix_2_vs_1, ".effect.high"),
+    dispersion  = paste0(prefix_2_vs_1, ".diff.win")
+  )
+  
+  return(list(
+    signif_raw_cond1_vs_cond2  = signif_raw_1_vs_2,
+    signif_holm_cond1_vs_cond2 = signif_holm_1_vs_2,
+    diff_cond1_vs_cond2        = diff_1_vs_2,
+    
+    signif_raw_cond2_vs_cond1  = signif_raw_2_vs_1,
+    signif_holm_cond2_vs_cond1 = signif_holm_2_vs_1,
+    diff_cond2_vs_cond1        = diff_2_vs_1
+  ))
+}
+
+# Générer toutes les combinaisons à 2 conditions
+comb <- combn(cond, 2) %>% t() %>% as.data.frame()
+colnames(comb) <- c("Cond1", "Cond2")
+
+# Pour chaque ligne, on applique la fonction comb_define
+comb <- comb %>%
+  mutate(Comparison = pmap(list(Cond1, Cond2), ~ comb_define(..1, ..2, df_merged)))
+
+# Transformer en data frame long
+comb <- comb %>%
+  rowwise() %>%
+  do({
+    # Extraire les conditions et le résultat de comb_define
+    cond1 <- .$Cond1
+    cond2 <- .$Cond2
+    comp  <- .$Comparison
+    
+    # Pour la direction Cond1 vs Cond2
+    df1 <- tibble(
+      Cond1 = cond1,
+      Cond2 = cond2,
+      direction = "Cond1_vs_Cond2",
+      type = c("signif", "signif_holm", names(comp$diff_cond1_vs_cond2)),
+      colname = c(comp$signif_raw_cond1_vs_cond2, comp$signif_holm_cond1_vs_cond2, comp$diff_cond1_vs_cond2)
+    )
+    
+    # Pour la direction Cond2 vs Cond1
+    df2 <- tibble(
+      Cond1 = cond1,
+      Cond2 = cond2,
+      direction = "Cond2_vs_Cond1",
+      type = c("signif", "signif_holm", names(comp$diff_cond2_vs_cond1)),
+      colname = c(comp$signif_raw_cond2_vs_cond1, comp$signif_holm_cond2_vs_cond1, comp$diff_cond2_vs_cond1)
+    )
+    
+    bind_rows(df1, df2)
+  }) %>%
+  ungroup()
+
+# Normalisation des noms de colonnes
+comb <- comb %>% mutate(colname = norm_colnames(colname))
+print(comb)
+
+# Vérifier si toutes les colonnes listées dans "comb$colname" existent dans df_merged
+missing_cols <- setdiff(comb$colname, colnames(df_merged))
+
+# Afficher les colonnes manquantes
+if (length(missing_cols) == 0) {
+  message("Toutes les colonnes existent dans df_merged.")
+} else {
+  message("Colonnes manquantes dans df_merged :")
+  print(missing_cols)
+}
+
+# Supprimer les lignes du tableau long contenant des colonnes manquantes
+df.diff <- comb %>% 
+  filter(colname %in% colnames(df_merged))
+print(df.diff)
+print(df.diff$colname)
+
+# FONCTION
+perform_dfa <- function(mapping, data, output_prefix, plot_title,
+                        signif_types = c("signif", "signif_holm"),
+                        ntop_signif = 10,
+                        ntop_rab = 5,
+                        direction = "Cond1_vs_Cond2",
+                        thresholds_neg = 1.5,
+                        thresholds_pos = 1.5,
+                        thresholds_pvalue = c(0.05, 0.01),
+                        size_pt = c(2.5, 1),
+                        size_lab = 3.5,
+                        colors_pt = c("grey50", "grey70", "#6598b1", "#e2003f"),
+                        colors_lab = c("#1D4995", "#a20101", "grey50"),
+                        labels = NULL,
+                        perform_volcano = TRUE,
+                        perform_MA = TRUE,
+                        perform_MW = TRUE,
+                        dim_volcano = c(9, 7),
+                        dim_MA = c(9, 7),
+                        dim_MW = c(9, 7)) {
+  
+  # Filtrer le mapping selon la direction et fixer l'ordre d'apparition
+  mapping_filt <- mapping %>%
+    dplyr::filter(direction == !!direction) %>%
+    dplyr::mutate(Cond1 = factor(Cond1, levels = unique(Cond1)),
+                  Cond2 = factor(Cond2, levels = unique(Cond2))) %>%
+    dplyr::arrange(Cond1, Cond2)
+  
+  comparisons <- mapping_filt %>%
+    dplyr::group_by(Cond1, Cond2, direction) %>%
+    dplyr::group_split()
+  
+  # Calcul des seuils
+  log2fc_threshold_neg <- -log2(thresholds_neg)
+  log2fc_threshold_pos <- log2(thresholds_pos)
+  pvalue_threshold     <- -log10(thresholds_pvalue[1])
+  pvalue_threshold2    <- -log10(thresholds_pvalue[2])
+  
+  # Extraire les métadonnées (colonnes dont le nom ne commence pas par "ref")
+  metadata <- data %>%
+    dplyr::select(msp, dplyr::everything()[!grepl("^ref", colnames(data))])
+  
+  # Boucle sur chaque comparaison
+  for(comp in comparisons) {
+    comp_id <- paste(unique(comp$Cond1), unique(comp$Cond2), sep = "_vs_")
+    message("Comparaison: ", comp_id)
+    
+    # Groupes pour la légende
+    ref_group <- as.character(unique(comp$Cond1))[1]
+    comp_group <- as.character(unique(comp$Cond2))[1]
+    
+    # Extraire les colonnes numériques
+    diff_col <- as.character((comp %>% dplyr::filter(type == "diff_btw") %>% dplyr::pull(colname))[1])
+    rab_col  <- as.character((comp %>% dplyr::filter(type == "rab_all") %>% dplyr::pull(colname))[1])
+    disp_col <- as.character((comp %>% dplyr::filter(type %in% c("dispersion", "diff_win")) %>% dplyr::pull(colname))[1])
+    message("diff_col: ", diff_col)
+    message("rab_col: ", rab_col)
+    message("disp_col: ", disp_col)
+    
+    # Créer le data frame de base
+    base_dp <- data %>%
+      dplyr::select(msp,
+                    diff_btw = !!sym(diff_col),
+                    rab_all  = !!sym(rab_col),
+                    diff_win = !!sym(disp_col))
+    
+    dp <- base_dp %>%
+      dplyr::left_join(metadata, by = "msp")
+    
+    # Boucle sur chaque type de p-value
+    for(pval_type in signif_types) {
+      pval_col <- as.character((comp %>% dplyr::filter(type == pval_type) %>% dplyr::pull(colname))[1])
+      if(is.na(pval_col) || !(pval_col %in% colnames(data))) {
+        warning(paste("La colonne", pval_col, "n'existe pas dans data pour la comparaison", comp_id))
+        next
+      }
+      
+      dp <- dp %>%
+        dplyr::left_join(data %>% dplyr::select(msp, pval_temp = !!sym(pval_col)), by = "msp") %>%
+        dplyr::mutate(pval = as.numeric(pval_temp)) %>%
+        dplyr::select(-pval_temp)
+      
+      # Agrégation par 'labels' si fourni
+      dp_aggr <- dp
+      if(!is.null(labels)) {
+        if(!(labels %in% colnames(dp))) {
+          warning("La métadonnée '", labels, "' n'existe pas dans data.")
+        } else {
+          dp_aggr <- dp %>%
+            dplyr::group_by(!!sym(labels)) %>%
+            dplyr::summarize(across(c(diff_btw, rab_all, diff_win, pval), ~ mean(.x, na.rm = TRUE)),
+                             msp = dplyr::first(msp),
+                             .groups = "drop")
+        }
+      }
+      dp_use <- dp_aggr
+      
+      # Pour Volcano et MW : définir la couleur et la couleur du label
+      dp_use <- dp_use %>% dplyr::mutate(
+        color = factor(case_when(
+          pval <= thresholds_pvalue[1] & diff_btw <= log2fc_threshold_neg ~ colors_pt[3],
+          pval <= thresholds_pvalue[1] & diff_btw >= log2fc_threshold_pos ~ colors_pt[4],
+          TRUE ~ colors_pt[2]
+        ), levels = c(colors_pt[3], colors_pt[4], colors_pt[2])),
+        label_color = case_when(
+          pval <= thresholds_pvalue[1] & diff_btw <= log2fc_threshold_neg ~ colors_lab[1],
+          pval <= thresholds_pvalue[1] & diff_btw >= log2fc_threshold_pos ~ colors_lab[2],
+          TRUE ~ colors_lab[3]
+        )
+      )
+      
+      # Sélectionner les points significatifs (pval <= seuil et diff_btw extrêmes)
+      sig_dp <- dp_use %>% 
+        dplyr::filter(pval <= thresholds_pvalue[1] &
+                        (diff_btw <= log2fc_threshold_neg | diff_btw >= log2fc_threshold_pos))
+      if(nrow(sig_dp) == 0) {
+        warning(paste("Aucune fonction significative trouvée pour", pval_type, "dans", comp_id, ". Aucun label affiché."))
+        all_labels <- dp_use[0, ]
+      } else {
+        neg_top <- sig_dp %>% 
+          dplyr::filter(diff_btw <= log2fc_threshold_neg) %>% 
+          dplyr::arrange(diff_btw) %>% 
+          dplyr::slice_head(n = ntop_signif)
+        pos_top <- sig_dp %>% 
+          dplyr::filter(diff_btw >= log2fc_threshold_pos) %>% 
+          dplyr::arrange(desc(diff_btw)) %>% 
+          dplyr::slice_head(n = ntop_signif)
+        all_labels <- dplyr::distinct(dplyr::bind_rows(neg_top, pos_top), msp, .keep_all = TRUE)
+      }
+      
+      # Pour le MA plot : sélectionner les ntop_rab points les plus abondants
+      if(nrow(sig_dp) > 0) {
+        ma_labels <- sig_dp %>% 
+          dplyr::arrange(desc(abs(rab_all))) %>% 
+          dplyr::slice_head(n = ntop_rab)
+      } else {
+        ma_labels <- dp_use[0, ]
+      }
+      
+      # Créer l'union des points annotés 
+      annotated_points <- dplyr::distinct(dplyr::bind_rows(all_labels, ma_labels), msp, .keep_all = TRUE)
+      
+      # Utiliser 'labels' si fourni, sinon 'msp'
+      if(!is.null(labels)) {
+        dp_use <- dp_use %>% dplyr::mutate(
+          label = ifelse(msp %in% annotated_points$msp, as.character(!!sym(labels)), "")
+        )
+        annotated_points <- annotated_points %>% dplyr::mutate(
+          label = as.character(!!sym(labels))
+        )
+      } else {
+        dp_use <- dp_use %>% dplyr::mutate(
+          label = ifelse(msp %in% annotated_points$msp, msp, "")
+        )
+      }
+      
+      # Définir la taille des points en fonction de l'annotation :
+      # points annotés = size_pt[1] et autres = size_pt[2]
+      dp_use <- dp_use %>% mutate(point_size = ifelse(msp %in% annotated_points$msp, size_pt[1], size_pt[2]))
+      
+      ### Volcano Plot
+      if(perform_volcano) {
+        volcano_plot <- ggplot(dp_use, aes(x = diff_btw, y = -log10(pval), color = color, size = point_size)) +
+          geom_point(alpha = 0.8) +
+          scale_color_manual(
+            values = setNames(c(colors_pt[3], colors_pt[4], colors_pt[2]),
+                              c(colors_pt[3], colors_pt[4], colors_pt[2])),
+            breaks = c(colors_pt[3], colors_pt[4]),
+            labels = c(ref_group, comp_group),
+            name = "Higher abundant in:"
+          ) +
+          scale_size_identity() +
+          guides(color = guide_legend(override.aes = list(size = size_pt[1]))) +
+          new_scale_color() +
+          geom_text_repel(data = annotated_points, 
+                          aes(x = diff_btw, y = -log10(pval), label = label, color = label_color),
+                          size = size_lab, max.overlaps = Inf, alpha = 1, show.legend = FALSE) +
+          scale_color_manual(values = c(colors_lab[1], colors_lab[2], colors_lab[3])) +
+          theme_prism() +
+          labs(title = plot_title, 
+               subtitle = paste("Volcano plot -", comp_id),
+               x = expression("Median Log"[2]*" Difference"),
+               y = expression("-"*log[10]*"(pvalue)"),
+               caption = paste("Top", ntop_signif+ntop_rab, "CLR-transformed data")) +
+          geom_hline(yintercept = pvalue_threshold, linetype = "dashed", color = "darkred") +
+          geom_hline(yintercept = pvalue_threshold2, linetype = "dashed", color = "#1ecb88") +
+          geom_vline(xintercept = c(log2fc_threshold_neg, log2fc_threshold_pos), linetype = "dashed", color = "darkred") +
+          annotate("rect", xmin = -Inf, xmax = log2fc_threshold_neg, 
+                   ymin = pvalue_threshold2, ymax = Inf, fill = "#efd2d2", alpha = 0.3) +
+          annotate("rect", xmin = log2fc_threshold_pos, xmax = Inf, 
+                   ymin = pvalue_threshold2, ymax = Inf, fill = "#efd2d2", alpha = 0.3) +
+          annotate("rect", xmin = -Inf, xmax = log2fc_threshold_neg, 
+                   ymin = pvalue_threshold, ymax = pvalue_threshold2, fill = "#b9ecd1", alpha = 0.3) +
+          annotate("rect", xmin = log2fc_threshold_pos, xmax = Inf, 
+                   ymin = pvalue_threshold, ymax = pvalue_threshold2, fill = "#b9ecd1", alpha = 0.3) +
+          theme(axis.text.x = element_text(angle = 0, hjust = 0.5, size = 14, face = "bold"),
+                axis.text.y = element_text(size = 14, face = "bold"),
+                axis.title.x = element_text(size = 14, face = "bold"),
+                axis.title.y = element_text(size = 14, face = "bold"),
+                legend.position = "right",
+                legend.title = element_text(size = 12, face = "bold"),
+                legend.text = element_text(size = 12),
+                plot.title = element_text(hjust = 0.5, size = 16, face = "bold", color = "black"),
+                plot.caption = element_text(size = 10, face = "bold"))
+        print(volcano_plot)
+        volcano_filename <- paste0(output_prefix, comp_id, "_", pval_type, "_", labels, "_volcano.png")
+        ggsave(volcano_filename, plot = volcano_plot, units = "in", width = dim_volcano[1], height = dim_volcano[2], dpi = 300, bg = "white")
+      }
+      
+      ### MA Plot
+      if(perform_MA) {
+        # Créer un jeu de données pour le MA plot en ajoutant 'ma_color'
+        dp_ma <- dp_use %>% mutate(ma_color = case_when(
+          diff_btw <= log2fc_threshold_neg ~ colors_pt[3],
+          diff_btw >= log2fc_threshold_pos ~ colors_pt[4],
+          TRUE ~ colors_pt[2]
+        ))
+        # Assurer que les points annotés possèdent également 'ma_color'
+        annotated_points <- annotated_points %>% mutate(ma_color = case_when(
+          diff_btw <= log2fc_threshold_neg ~ colors_pt[3],
+          diff_btw >= log2fc_threshold_pos ~ colors_pt[4],
+          TRUE ~ colors_pt[2]
+        ))
+        
+        ma_plot <- ggplot(dp_ma, aes(x = abs(rab_all), y = diff_btw, color = ma_color, size = point_size)) +
+          geom_point(alpha = 0.8) +
+          scale_color_manual(
+            values = setNames(c(colors_pt[3], colors_pt[4], colors_pt[2]),
+                              c(colors_pt[3], colors_pt[4], colors_pt[2])),
+            breaks = c(colors_pt[3], colors_pt[4]),
+            labels = c(ref_group, comp_group),
+            name = "Higher abundant in:"
+          ) +
+          scale_size_identity() +
+          guides(color = guide_legend(override.aes = list(size = size_pt[1]))) +
+          new_scale_color() +
+          geom_text_repel(data = annotated_points, 
+                          aes(x = abs(rab_all), y = diff_btw, label = label, color = label_color),
+                          size = size_lab, max.overlaps = Inf, alpha = 1, show.legend = FALSE) +
+          scale_color_identity() +
+          theme_prism() +
+          labs(title = plot_title,
+               subtitle = paste("MA Plot -", comp_id),
+               x = expression("Median Log"[2]*" relative abundance"),
+               y = expression("Median Log"[2]*" Difference"),
+               caption = paste("Top", ntop_signif+ntop_rab, "CLR-transformed data"),
+               color = "Significance\n(p < 0.05)") +
+          geom_hline(yintercept = 0, linetype = "dashed", color = "grey50") +
+          geom_hline(yintercept = c(log2fc_threshold_neg, log2fc_threshold_pos), linetype = "dashed", color = "darkred") +
+          theme(axis.text.x = element_text(size = 14, face = "bold"),
+                axis.text.y = element_text(size = 14, face = "bold"),
+                axis.title.x = element_text(size = 14, face = "bold"),
+                axis.title.y = element_text(size = 14, face = "bold"),
+                legend.position = "right",
+                legend.title = element_text(size = 12, face = "bold"),
+                legend.text = element_text(size = 12),
+                plot.title = element_text(hjust = 0.5, size = 16, face = "bold", color = "black"),
+                plot.caption = element_text(size = 10, face = "bold"))
+        print(ma_plot)
+        ma_filename <- paste0(output_prefix, comp_id, "_", pval_type, "_", labels, "_MA.png")
+        ggsave(ma_filename, plot = ma_plot, units = "in", width = dim_MA[1], height = dim_MA[2], dpi = 300, bg = "white")
+      }
+      
+      ### MW Plot
+      if(perform_MW) {
+        if(!"diff_win" %in% colnames(dp_use)) {
+          warning("La colonne 'diff_win' est introuvable pour la comparaison ", comp_id, "... MW plot ignoré!")
+        } else {
+          mw_plot <- ggplot(dp_use, aes(x = diff_win, y = diff_btw, color = color, size = point_size)) +
+            geom_point(alpha = 0.8) +
+            scale_color_manual(
+              values = setNames(c(colors_pt[3], colors_pt[4], colors_pt[2]),
+                                c(colors_pt[3], colors_pt[4], colors_pt[2])),
+              breaks = c(colors_pt[3], colors_pt[4]),
+              labels = c(ref_group, comp_group),
+              name = "Higher abundant in:"
+            ) +
+            scale_size_identity() +
+            guides(color = guide_legend(override.aes = list(size = size_pt[1]))) +
+            new_scale_color() +
+            geom_text_repel(data = annotated_points, 
+                            aes(x = diff_win, y = diff_btw, label = label, color = label_color),
+                            size = size_lab, max.overlaps = Inf, alpha = 1, show.legend = FALSE) +
+            scale_color_identity() +
+            theme_prism() +
+            labs(title = plot_title, 
+                 subtitle = paste("MW Plot -", comp_id),
+                 x = expression("Median Log"[2]*" Dispersion"),
+                 y = expression("Median Log"[2]*" Difference"),
+                 caption = paste("Top", ntop_signif+ntop_rab, "CLR-transformed data")) +
+            geom_hline(yintercept = c(log2fc_threshold_neg, log2fc_threshold_pos), linetype = "dashed", color = "darkred") +
+            geom_vline(xintercept = 0, linetype = "dashed", color = "black") +
+            geom_abline(intercept = 0, slope = 1, linetype = "dashed", color = "grey50") +
+            geom_abline(intercept = 0, slope = -1, linetype = "dashed", color = "grey50") +
+            theme(axis.text.x = element_text(angle = 0, hjust = 0.5, size = 14, face = "bold"),
+                  axis.text.y = element_text(size = 14, face = "bold"),
+                  axis.title.x = element_text(size = 14, face = "bold"),
+                  axis.title.y = element_text(size = 14, face = "bold"),
+                  legend.position = "right",
+                  legend.title = element_text(size = 12, face = "bold"),
+                  legend.text = element_text(size = 12),
+                  plot.title = element_text(hjust = 0.5, size = 16, face = "bold", color = "black"),
+                  plot.caption = element_text(size = 10, face = "bold"))
+          print(mw_plot)
+          mw_filename <- paste0(output_prefix, comp_id, "_", pval_type, "_", labels, "_MW.png")
+          ggsave(mw_filename, plot = mw_plot, units = "in", width = dim_MW[1], height = dim_MW[2], dpi = 300, bg = "white")
+        }
+      }
+    }
+  }
+}
+
+
+# Utilisation de la fonction :
+# - 'df.diff' est le tableau de correspondance (mapping)
+# - 'df_merged' contient les valeurs (data)
+signif.cols <- c("signif", "signif_holm")
+
+perform_dfa(
+  mapping = df.diff,
+  data = df_merged,
+  output_prefix = "Figures/Taxonomic/DAA/",
+  plot_title = "Differential Abundance Analysis",
+  signif_types = signif.cols,
+  ntop_signif = 15,
+  ntop_rab = 5,
+  labels = "species",
+  direction = "Cond1_vs_Cond2",
+  thresholds_neg = 1.5,
+  thresholds_pos = 1.5,
+  thresholds_pvalue = c(0.05, 0.01),
+  size_pt = c(2.5, 1),
+  size_lab = 3.5,
+  colors_pt = c("grey50", "grey70", "#6598b1", "#e2003f"),
+  colors_lab = c("#1D4995", "#a20101", "grey50"),
+  perform_volcano = TRUE,
+  perform_MA = TRUE,
+  perform_MW = TRUE,
+  dim_volcano = c(9, 7),
+  dim_MA = c(9, 7),
+  dim_MW = c(9, 7)
+)
+
