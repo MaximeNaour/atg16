@@ -225,7 +225,8 @@ df_melt$ttt <- factor(df_melt$ttt, levels = cond)
 df_melt$step <- factor(df_melt$step, levels = c("raw", "mapped"))
 
 # Associer des couleurs spécifiques aux conditions
-cond.colors <- RColorBrewer::brewer.pal(length(cond), "Set1")
+RColorBrewer::brewer.pal(length(cond), "Set1")
+cond.colors <- c("#377EB8", "#E41A1C", "#4DAF4A", "#984EA3")
 names(cond.colors) <- cond
 
 # Identifier le nombre minimum et maximum de reads
@@ -394,7 +395,8 @@ threshold <- min(sample_sums(ps.filt))
 print(threshold)
 
 # Associer des couleurs spécifiques aux conditions
-cond.colors <- RColorBrewer::brewer.pal(length(cond), "Set1")
+RColorBrewer::brewer.pal(length(cond), "Set1")
+cond.colors <- c("#377EB8", "#E41A1C", "#4DAF4A", "#984EA3")
 names(cond.colors) <- cond
 
 # Création du graphique de rarefaction
@@ -446,7 +448,8 @@ ps.filt <- subset_samples(ps, Condition %in% cond)
 sample_data(ps.filt)$Condition <- factor(sample_data(ps.filt)$Condition, levels = cond)
 
 # Associer des couleurs spécifiques aux conditions
-cond.colors <- RColorBrewer::brewer.pal(length(cond), "Set1")
+RColorBrewer::brewer.pal(length(cond), "Set1")
+cond.colors <- c("#377EB8", "#E41A1C", "#4DAF4A", "#984EA3")
 names(cond.colors) <- cond
 
 # Calcul des mesures de diversité
@@ -829,7 +832,8 @@ sample_data(ps.filt)$Condition <- factor(sample_data(ps.filt)$Condition, levels 
 sample_data(ps.clr.filt)$Condition <- factor(sample_data(ps.clr.filt)$Condition, levels = cond)
 
 # Associer des couleurs spécifiques aux conditions
-cond.colors <- RColorBrewer::brewer.pal(length(cond), "Set1")
+RColorBrewer::brewer.pal(length(cond), "Set1")
+cond.colors <- c("#377EB8", "#E41A1C", "#4DAF4A", "#984EA3")
 names(cond.colors) <- cond
 
 # Fonction pour générer les analyses de beta-diversité
@@ -990,7 +994,8 @@ ps.clr.filt <- subset_samples(ps.clr, Condition %in% cond)
 sample_data(ps.clr.filt)$Condition <- factor(sample_data(ps.clr.filt)$Condition, levels = cond)
 
 # Associer des couleurs spécifiques aux conditions
-cond.colors <- RColorBrewer::brewer.pal(length(cond), "Set1")
+RColorBrewer::brewer.pal(length(cond), "Set1")
+cond.colors <- c("#377EB8", "#E41A1C", "#4DAF4A", "#984EA3")
 names(cond.colors) <- cond
 
 # Revenir aux "pseudo-comptages bruts" à partir des données CLR
@@ -1020,7 +1025,8 @@ ps.clr.raw.filt <- subset_samples(ps.clr.raw, Condition %in% cond)
 sample_data(ps.clr.raw.filt)$Condition <- factor(sample_data(ps.clr.raw.filt)$Condition, levels = cond)
 
 # Associer des couleurs spécifiques aux conditions
-cond.colors <- RColorBrewer::brewer.pal(length(cond), "Set1")
+RColorBrewer::brewer.pal(length(cond), "Set1")
+cond.colors <- c("#377EB8", "#E41A1C", "#4DAF4A", "#984EA3")
 names(cond.colors) <- cond
 
 # Fonction pour générer les barplots de l'analyse compositionnelle
@@ -1165,11 +1171,12 @@ head(ps.clr@tax_table)
 cond <- c("Atg16wt", "Atg16ko", "Pou2f3ko", "Atg16ko; Pou2f3ko")
 
 # Associer des couleurs spécifiques aux conditions
-cond.colors <- RColorBrewer::brewer.pal(length(cond), "Set1")
+RColorBrewer::brewer.pal(length(cond), "Set1")
+cond.colors <- c("#377EB8", "#E41A1C", "#4DAF4A", "#984EA3")
 names(cond.colors) <- cond
 
-# Définir la couleurs des labels
-cond.colors.lab <- setNames(c("#b11314", "#205784", "#2f732d", "#682b71"), cond)
+# Définir la couleur des labels
+cond.colors.lab <- setNames(c("#205784", "#b11314", "#2f732d", "#682b71"), cond)
 
 # Sélectionner les individus selon leur Condition
 ps.filt <- subset_samples(ps.clr, Condition %in% cond)
@@ -1308,7 +1315,7 @@ df.diff <- comb %>%
 print(df.diff)
 print(df.diff$colname)
 
-# FONCTION
+# FONCTION de traitement différentiel
 diff.proc <- function(mapping, data, output_prefix, plot_title,
                       signif_types = c("signif", "signif_holm"),
                       ntop_signif = 10,
@@ -1424,14 +1431,14 @@ diff.proc <- function(mapping, data, output_prefix, plot_title,
       }
       dp_use <- dp_aggr
       
-      # Définir les couleurs des points et, pour les points significatifs, les couleurs des labels
+      # --- Création d'une variable "group" pour la légende ---
       dp_use <- dp_use %>%
         dplyr::mutate(
-          color = factor(case_when(
-            pval <= thresholds_pvalue[1] & diff_btw <= log2fc_threshold_neg ~ ref_color,
-            pval <= thresholds_pvalue[1] & diff_btw >= log2fc_threshold_pos ~ comp_color,
-            TRUE ~ colors_pt[2]
-          ), levels = c(ref_color, comp_color, colors_pt[2])),
+          group = case_when(
+            pval <= thresholds_pvalue[1] & diff_btw <= log2fc_threshold_neg ~ ref_group,
+            pval <= thresholds_pvalue[1] & diff_btw >= log2fc_threshold_pos ~ comp_group,
+            TRUE ~ "non significatif"
+          ),
           label_color = case_when(
             pval <= thresholds_pvalue[1] & diff_btw <= log2fc_threshold_neg ~ 
               (if (!is.null(cond_colors_lab) && ref_group %in% names(cond_colors_lab)) cond_colors_lab[ref_group] else colors_lab[1]),
@@ -1449,6 +1456,8 @@ diff.proc <- function(mapping, data, output_prefix, plot_title,
       if(nrow(sig_dp) == 0) {
         warning(paste("No significant function found for", pval_type, "in", comp_id, ". No labels displayed."))
         all_labels <- dp_use[0, ]
+        n_neg <- 0
+        n_pos <- 0
       } else {
         neg_top <- sig_dp %>%
           dplyr::filter(diff_btw <= log2fc_threshold_neg) %>%
@@ -1459,6 +1468,8 @@ diff.proc <- function(mapping, data, output_prefix, plot_title,
           dplyr::arrange(desc(diff_btw)) %>%
           dplyr::slice_head(n = ntop_signif)
         all_labels <- dplyr::distinct(dplyr::bind_rows(neg_top, pos_top), msp, .keep_all = TRUE)
+        n_neg <- nrow(neg_top)
+        n_pos <- nrow(pos_top)
       }
       
       # Pour le MA plot : sélectionner les ntop_rab points les plus abondants
@@ -1489,12 +1500,12 @@ diff.proc <- function(mapping, data, output_prefix, plot_title,
       
       ### Volcano Plot
       if (perform_volcano) {
-        volcano_plot <- ggplot(dp_use, aes(x = diff_btw, y = -log10(pval), color = color, size = point_size)) +
+        volcano_plot <- ggplot(dp_use, aes(x = diff_btw, y = -log10(pval), color = group, size = point_size)) +
           geom_point(alpha = 0.8) +
           scale_color_manual(
-            values = setNames(c(ref_color, comp_color, colors_pt[2]),
-                              c(ref_color, comp_color, colors_pt[2])),
-            breaks = c(ref_color, comp_color),
+            values = setNames(c(cond_colors[ref_group], cond_colors[comp_group]),
+                              c(ref_group, comp_group)),
+            breaks = c(ref_group, comp_group),
             labels = c(ref_group, comp_group),
             name = "Higher abundant in:"
           ) +
@@ -1510,7 +1521,7 @@ diff.proc <- function(mapping, data, output_prefix, plot_title,
                subtitle = paste("Volcano plot -", comp_id),
                x = expression("Median Log"[2]*" Difference"),
                y = expression("-"*log[10]*"(p-value)"),
-               caption = paste("Top", ntop_signif + ntop_rab, "CLR-transformed data")) +
+               caption = paste("CLR-transformed data\nTop", n_neg, "for", ref_group, "& Top", n_pos, "for", comp_group)) +
           geom_hline(yintercept = pvalue_threshold, linetype = "dashed", color = "darkred") +
           geom_hline(yintercept = pvalue_threshold2, linetype = "dashed", color = "#1ecb88") +
           geom_vline(xintercept = c(log2fc_threshold_neg, log2fc_threshold_pos), linetype = "dashed", color = "darkred") +
@@ -1539,23 +1550,20 @@ diff.proc <- function(mapping, data, output_prefix, plot_title,
       
       ### MA Plot
       if (perform_MA) {
-        dp_ma <- dp_use %>% dplyr::mutate(ma_color = case_when(
-          diff_btw <= log2fc_threshold_neg ~ ref_color,
-          diff_btw >= log2fc_threshold_pos ~ comp_color,
-          TRUE ~ colors_pt[2]
-        ))
-        annotated_points <- annotated_points %>% dplyr::mutate(ma_color = case_when(
-          diff_btw <= log2fc_threshold_neg ~ ref_color,
-          diff_btw >= log2fc_threshold_pos ~ comp_color,
-          TRUE ~ colors_pt[2]
-        ))
+        # Créer une variable "ma_group" similaire à "group"
+        dp_ma <- dp_use %>% 
+          dplyr::mutate(ma_group = case_when(
+            diff_btw <= log2fc_threshold_neg ~ ref_group,
+            diff_btw >= log2fc_threshold_pos ~ comp_group,
+            TRUE ~ "non significatif"
+          ))
         
-        ma_plot <- ggplot(dp_ma, aes(x = abs(rab_all), y = diff_btw, color = ma_color, size = point_size)) +
+        ma_plot <- ggplot(dp_ma, aes(x = abs(rab_all), y = diff_btw, color = ma_group, size = point_size)) +
           geom_point(alpha = 0.8) +
           scale_color_manual(
-            values = setNames(c(ref_color, comp_color, colors_pt[2]),
-                              c(ref_color, comp_color, colors_pt[2])),
-            breaks = c(ref_color, comp_color),
+            values = setNames(c(cond_colors[ref_group], cond_colors[comp_group]),
+                              c(ref_group, comp_group)),
+            breaks = c(ref_group, comp_group),
             labels = c(ref_group, comp_group),
             name = "Higher abundant in:"
           ) +
@@ -1563,6 +1571,7 @@ diff.proc <- function(mapping, data, output_prefix, plot_title,
           guides(color = guide_legend(override.aes = list(size = size_pt[1]))) +
           ggnewscale::new_scale_color() +
           geom_text_repel(data = annotated_points,
+                          inherit.aes = FALSE,
                           aes(x = abs(rab_all), y = diff_btw, label = label, color = label_color),
                           size = size_lab, max.overlaps = Inf, alpha = 1, show.legend = FALSE) +
           scale_color_identity() +
@@ -1571,7 +1580,7 @@ diff.proc <- function(mapping, data, output_prefix, plot_title,
                subtitle = paste("MA Plot -", comp_id),
                x = expression("Median Log"[2]*" relative abundance"),
                y = expression("Median Log"[2]*" Difference"),
-               caption = paste("Top", ntop_signif + ntop_rab, "CLR-transformed data"),
+               caption = paste("CLR-transformed data\nTop", n_neg, "for", ref_group, "& Top", n_pos, "for", comp_group),
                color = "Significance\n(p < 0.05)") +
           geom_hline(yintercept = 0, linetype = "dashed", color = "grey50") +
           geom_hline(yintercept = c(log2fc_threshold_neg, log2fc_threshold_pos), linetype = "dashed", color = "darkred") +
@@ -1595,12 +1604,12 @@ diff.proc <- function(mapping, data, output_prefix, plot_title,
         if (!"diff_win" %in% colnames(dp_use)) {
           warning(paste("The column 'diff_win' is not found for comparison", comp_id, "... MW plot skipped!"))
         } else {
-          mw_plot <- ggplot(dp_use, aes(x = diff_win, y = diff_btw, color = color, size = point_size)) +
+          mw_plot <- ggplot(dp_use, aes(x = diff_win, y = diff_btw, color = group, size = point_size)) +
             geom_point(alpha = 0.8) +
             scale_color_manual(
-              values = setNames(c(ref_color, comp_color, colors_pt[2]),
-                                c(ref_color, comp_color, colors_pt[2])),
-              breaks = c(ref_color, comp_color),
+              values = setNames(c(cond_colors[ref_group], cond_colors[comp_group]),
+                                c(ref_group, comp_group)),
+              breaks = c(ref_group, comp_group),
               labels = c(ref_group, comp_group),
               name = "Higher abundant in:"
             ) +
@@ -1616,7 +1625,7 @@ diff.proc <- function(mapping, data, output_prefix, plot_title,
                  subtitle = paste("MW Plot -", comp_id),
                  x = expression("Median Log"[2]*" Dispersion"),
                  y = expression("Median Log"[2]*" Difference"),
-                 caption = paste("Top", ntop_signif + ntop_rab, "CLR-transformed data")) +
+                 caption = paste("CLR-transformed data\nTop", n_neg, "for", ref_group, "& Top", n_pos, "for", comp_group)) +
             geom_hline(yintercept = c(log2fc_threshold_neg, log2fc_threshold_pos),
                        linetype = "dashed", color = "darkred") +
             geom_vline(xintercept = 0, linetype = "dashed", color = "black") +
@@ -1643,11 +1652,16 @@ diff.proc <- function(mapping, data, output_prefix, plot_title,
         dp_bp <- dp_use %>% dplyr::arrange(desc(abs(diff_btw)))
         top_pos_bp <- dp_bp %>% dplyr::filter(diff_btw > 0) %>% dplyr::slice_head(n = ntop_bp/2)
         top_neg_bp <- dp_bp %>% dplyr::filter(diff_btw < 0) %>% dplyr::slice_head(n = ntop_bp/2)
+        # Calcul des nombres effectifs pour chaque condition
+        n_neg_bp <- nrow(top_neg_bp)
+        n_pos_bp <- nrow(top_pos_bp)
+        
         bp_data <- dplyr::bind_rows(
           top_neg_bp %>% dplyr::mutate(Direction = ref_group),
           top_pos_bp %>% dplyr::mutate(Direction = comp_group)
         )
-        bp_data$Direction <- factor(bp_data$Direction, levels = c(comp_group, ref_group))
+        # Inverser l'ordre pour que le groupe avec les valeurs négatives (ref_group) apparaisse en haut
+        bp_data$Direction <- factor(bp_data$Direction, levels = c(ref_group, comp_group))
         
         if (!is.null(labels) && labels %in% colnames(bp_data)) {
           bp_data <- bp_data %>% dplyr::mutate(
@@ -1670,7 +1684,7 @@ diff.proc <- function(mapping, data, output_prefix, plot_title,
           hjust = ifelse(diff_btw > 0, -0.2, 1.2)
         )
         
-        barplot <- ggplot(bp_data, aes(x = reorder(Label, diff_btw), y = diff_btw, fill = Direction)) +
+        barplot <- ggplot(bp_data, aes(x = reorder(Label, -diff_btw), y = diff_btw, fill = Direction)) +
           geom_bar(stat = "identity") +
           coord_flip() +
           geom_hline(yintercept = log2fc_threshold_neg, color = "red3", linetype = "dashed", linewidth = 0.5) +
@@ -1678,7 +1692,7 @@ diff.proc <- function(mapping, data, output_prefix, plot_title,
           labs(title = plot_title,
                x = "",
                y = expression("Median Log"[2]*" Difference"),
-               caption = paste("Top", ntop_bp/2, "per condition - CLR-transformed data")) +
+               caption = paste("CLR-transformed data\nTop", n_neg_bp, "for", ref_group, "& Top", n_pos_bp, "for", comp_group)) +
           theme_minimal() +
           theme(legend.position = "right",
                 text = element_text(size = 14),
@@ -1688,7 +1702,8 @@ diff.proc <- function(mapping, data, output_prefix, plot_title,
                 axis.text.x = element_text(size = 12, face = "bold"),
                 axis.text.y = element_text(size = 10, face = "bold"),
                 legend.title = element_text(face = "bold"),
-                legend.text = element_text(face = "bold")
+                legend.text = element_text(face = "bold"),
+                plot.caption = element_text(size = 10, face = "bold")
           ) +
           scale_fill_manual(
             name = "Higher abundant in:",
@@ -1706,11 +1721,16 @@ diff.proc <- function(mapping, data, output_prefix, plot_title,
         dp_sp <- dp_use %>% dplyr::arrange(desc(abs(diff_btw)))
         top_pos_sp <- dp_sp %>% dplyr::filter(diff_btw > 0) %>% dplyr::slice_head(n = ntop_sp/2)
         top_neg_sp <- dp_sp %>% dplyr::filter(diff_btw < 0) %>% dplyr::slice_head(n = ntop_sp/2)
+        # Calcul des nombres effectifs pour chaque condition
+        n_neg_sp <- nrow(top_neg_sp)
+        n_pos_sp <- nrow(top_pos_sp)
+        
         sp_data <- dplyr::bind_rows(
           top_neg_sp %>% dplyr::mutate(Direction = ref_group),
           top_pos_sp %>% dplyr::mutate(Direction = comp_group)
         )
-        sp_data$Direction <- factor(sp_data$Direction, levels = c(comp_group, ref_group))
+        # Inverser l'ordre des niveaux pour que ref_group (négatif) apparaisse en haut
+        sp_data$Direction <- factor(sp_data$Direction, levels = c(ref_group, comp_group))
         
         if (!is.null(labels) && labels %in% colnames(sp_data)) {
           sp_data <- sp_data %>% dplyr::mutate(
@@ -1740,7 +1760,7 @@ diff.proc <- function(mapping, data, output_prefix, plot_title,
           round(max(abs(sp_data$rab_all)), 2)
         )
         
-        scatterplot <- ggplot(sp_data, aes(x = reorder(Label, diff_btw), y = diff_btw, size = abs(rab_all), color = Direction)) +
+        scatterplot <- ggplot(sp_data, aes(x = reorder(Label, -diff_btw), y = diff_btw, size = abs(rab_all), color = Direction)) +
           geom_point(alpha = 0.8) +
           coord_flip() +
           geom_hline(yintercept = log2fc_threshold_neg, color = "red3", linetype = "dashed", linewidth = 0.5) +
@@ -1748,7 +1768,7 @@ diff.proc <- function(mapping, data, output_prefix, plot_title,
           labs(title = plot_title,
                x = "",
                y = expression("Median Log"[2]*" Difference"),
-               caption = paste("Top", ntop_sp/2, "per condition - CLR-transformed data")) +
+               caption = paste("CLR-transformed data\nTop", n_neg_sp, "for", ref_group, "& Top", n_pos_sp, "for", comp_group)) +
           theme_minimal() +
           theme(legend.position = "right",
                 text = element_text(size = 14),
@@ -1758,7 +1778,8 @@ diff.proc <- function(mapping, data, output_prefix, plot_title,
                 axis.text.x = element_text(size = 12, face = "bold"),
                 axis.text.y = element_text(size = 10, face = "bold"),
                 legend.title = element_text(face = "bold"),
-                legend.text = element_text(face = "bold")
+                legend.text = element_text(face = "bold"),
+                plot.caption = element_text(size = 10, face = "bold")
           ) +
           scale_size_continuous(
             name = expression("Median Log"[2]*" relative abundance"),
@@ -1768,7 +1789,8 @@ diff.proc <- function(mapping, data, output_prefix, plot_title,
           ) +
           scale_color_manual(
             name = "Higher abundant in:",
-            values = setNames(c(comp_color, ref_color), c(comp_group, ref_group)),
+            values = setNames(c(cond_colors[ref_group], cond_colors[comp_group]),
+                              c(ref_group, comp_group)),
             guide = guide_legend(override.aes = list(size = 5))
           ) +
           geom_text(aes(label = sig_label, hjust = hjust), nudge_x = -0.2, color = "black", size = 5)
@@ -1787,34 +1809,44 @@ diff.proc <- function(mapping, data, output_prefix, plot_title,
 # - 'df_merged' contient les valeurs (data)
 signif.cols <- c("signif", "signif_holm")
 
-diff.proc(
-  mapping = df.diff,
-  data = df_merged,
-  output_prefix = "Figures/Taxonomic/DAA/",
-  plot_title = "Differential Abundance Analysis",
-  signif_types = signif.cols,
-  ntop_signif = 15,
-  ntop_rab = 5,
-  ntop_bp = 50,
-  ntop_sp = 50,
-  labels = "species",
-  direction = "Cond1_vs_Cond2",
-  thresholds_neg = 1.5,
-  thresholds_pos = 1.5,
-  thresholds_pvalue = c(0.05, 0.01),
-  size_pt = c(2.5, 1),
-  size_lab = 3.5,
-  cond_colors = cond.colors,
-  cond_colors_lab = cond.colors.lab,
-  perform_volcano = TRUE,
-  perform_MA = TRUE,
-  perform_MW = TRUE,
-  perform_bp = TRUE,
-  perform_sp = TRUE,
-  dim_volcano = c(10, 8),
-  dim_MA = c(10, 8),
-  dim_MW = c(10, 8),
-  dim_bp = c(12, 10),
-  dim_sp = c(12, 10)
-)
+# Taxonomic levels to analyse
+tax_levels <- colnames(ps.clr@tax_table)[2:length(colnames(ps.clr@tax_table))]
+
+# Perform differential abundance analysis for each taxonomic level
+for (lvl in tax_levels) {
+  message(paste("\nPerform differential abundance analysis for", lvl, "\n"))
+  diff.proc(
+    mapping = df.diff,
+    data = df_merged,
+    output_prefix = "Figures/Taxonomic/DAA/",
+    plot_title = "Differential Abundance Analysis",
+    signif_types = signif.cols,
+    ntop_signif = 15,
+    ntop_rab = 5,
+    ntop_bp = 50,
+    ntop_sp = 50,
+    labels = lvl,
+    direction = "Cond1_vs_Cond2",
+    thresholds_neg = 1.5,
+    thresholds_pos = 1.5,
+    thresholds_pvalue = c(0.05, 0.01),
+    size_pt = c(2.5, 1),
+    size_lab = 3.5,
+    cond_colors = cond.colors,
+    cond_colors_lab = cond.colors.lab,
+    perform_volcano = TRUE,
+    perform_MA = TRUE,
+    perform_MW = TRUE,
+    perform_bp = TRUE,
+    perform_sp = TRUE,
+    dim_volcano = c(10, 8),
+    dim_MA = c(10, 8),
+    dim_MW = c(10, 8),
+    dim_bp = c(12, 10),
+    dim_sp = c(12, 10)
+  )
+}
+
+
+
 
